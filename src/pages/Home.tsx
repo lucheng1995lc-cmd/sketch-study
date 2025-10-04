@@ -1,16 +1,26 @@
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { Play, Pause, RotateCcw, Upload } from "lucide-react";
+import { Pause, StopCircle, Music, Upload } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import BottomNav from "@/components/BottomNav";
+import { useLocation } from "react-router-dom";
+
+interface Task {
+  id: string;
+  title: string;
+  timerType: "countdown" | "countup";
+}
 
 const Home = () => {
+  const location = useLocation();
+  const task = location.state?.task as Task | undefined;
+  
   const [workTime, setWorkTime] = useState(25 * 60);
-  const [breakTime, setBreakTime] = useState(5 * 60);
-  const [timeLeft, setTimeLeft] = useState(workTime);
+  const [timeLeft, setTimeLeft] = useState(0);
   const [isRunning, setIsRunning] = useState(false);
-  const [isWorkSession, setIsWorkSession] = useState(true);
   const [characterImage, setCharacterImage] = useState<string>("");
+  const [currentTask, setCurrentTask] = useState<Task | null>(null);
+  const [sessionStartTime, setSessionStartTime] = useState<number>(0);
   const { toast } = useToast();
   const intervalRef = useRef<number>();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -20,24 +30,31 @@ const Home = () => {
     if (savedImage) setCharacterImage(savedImage);
     
     const savedWorkTime = localStorage.getItem("workTime");
-    const savedBreakTime = localStorage.getItem("breakTime");
     if (savedWorkTime) setWorkTime(parseInt(savedWorkTime));
-    if (savedBreakTime) setBreakTime(parseInt(savedBreakTime));
   }, []);
 
   useEffect(() => {
-    setTimeLeft(isWorkSession ? workTime : breakTime);
-  }, [workTime, breakTime, isWorkSession]);
+    if (task) {
+      setCurrentTask(task);
+      setTimeLeft(task.timerType === "countdown" ? workTime : 0);
+      setIsRunning(true);
+      setSessionStartTime(Date.now());
+    }
+  }, [task]);
 
   useEffect(() => {
-    if (isRunning) {
+    if (isRunning && currentTask) {
       intervalRef.current = window.setInterval(() => {
         setTimeLeft((prev) => {
-          if (prev <= 1) {
-            handleSessionComplete();
-            return 0;
+          if (currentTask.timerType === "countdown") {
+            if (prev <= 1) {
+              handleSessionComplete();
+              return 0;
+            }
+            return prev - 1;
+          } else {
+            return prev + 1;
           }
-          return prev - 1;
         });
       }, 1000);
     } else {
@@ -46,30 +63,72 @@ const Home = () => {
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [isRunning]);
+  }, [isRunning, currentTask]);
 
   const handleSessionComplete = () => {
+    if (!currentTask) return;
+    
     setIsRunning(false);
+    const sessionDuration = Math.floor((Date.now() - sessionStartTime) / 1000);
     
-    // Save session to time pool
+    // Save session to time pool by task
     const today = new Date().toISOString().split("T")[0];
-    const timePool = JSON.parse(localStorage.getItem("timePool") || "{}");
-    const sessionTime = isWorkSession ? workTime : breakTime;
+    const timePool = JSON.parse(localStorage.getItem("taskTimePool") || "{}");
     
-    if (!timePool[today]) timePool[today] = { work: 0, break: 0 };
-    if (isWorkSession) {
-      timePool[today].work += sessionTime;
-    } else {
-      timePool[today].break += sessionTime;
+    if (!timePool[today]) timePool[today] = {};
+    if (!timePool[today][currentTask.id]) {
+      timePool[today][currentTask.id] = {
+        taskName: currentTask.title,
+        duration: 0,
+        sessions: 0,
+      };
     }
-    localStorage.setItem("timePool", JSON.stringify(timePool));
+    
+    timePool[today][currentTask.id].duration += sessionDuration;
+    timePool[today][currentTask.id].sessions += 1;
+    
+    localStorage.setItem("taskTimePool", JSON.stringify(timePool));
 
     toast({
-      title: isWorkSession ? "工作完成！" : "休息结束！",
-      description: isWorkSession ? "该休息一下了" : "继续努力工作吧",
+      title: "专注完成！",
+      description: `${currentTask.title} - ${formatTime(sessionDuration)}`,
     });
     
-    setIsWorkSession(!isWorkSession);
+    setCurrentTask(null);
+    setTimeLeft(0);
+  };
+
+  const handleStop = () => {
+    if (!currentTask || !isRunning) return;
+    
+    const sessionDuration = Math.floor((Date.now() - sessionStartTime) / 1000);
+    
+    // Save partial session
+    const today = new Date().toISOString().split("T")[0];
+    const timePool = JSON.parse(localStorage.getItem("taskTimePool") || "{}");
+    
+    if (!timePool[today]) timePool[today] = {};
+    if (!timePool[today][currentTask.id]) {
+      timePool[today][currentTask.id] = {
+        taskName: currentTask.title,
+        duration: 0,
+        sessions: 0,
+      };
+    }
+    
+    timePool[today][currentTask.id].duration += sessionDuration;
+    timePool[today][currentTask.id].sessions += 1;
+    
+    localStorage.setItem("taskTimePool", JSON.stringify(timePool));
+    
+    setIsRunning(false);
+    setCurrentTask(null);
+    setTimeLeft(0);
+    
+    toast({
+      title: "专注已停止",
+      description: `${currentTask.title} - ${formatTime(sessionDuration)}`,
+    });
   };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -95,23 +154,32 @@ const Home = () => {
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   };
 
-  const progress = isWorkSession
+  const progress = currentTask?.timerType === "countdown" && workTime > 0
     ? ((workTime - timeLeft) / workTime) * 100
-    : ((breakTime - timeLeft) / breakTime) * 100;
+    : 0;
 
   return (
-    <div className="min-h-screen bg-secondary pb-24">
-      <div className="max-w-lg mx-auto px-4 pt-12">
-        {/* Header */}
-        <div className="text-center mb-8">
-          <h1 className="text-2xl font-bold text-foreground">番茄钟</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            {isWorkSession ? "专注工作时间" : "休息时间"}
-          </p>
+    <div className="relative min-h-screen pb-24">
+      {/* Full Screen Background Image */}
+      {characterImage && (
+        <div className="fixed inset-0 z-0">
+          <img
+            src={characterImage}
+            alt="Character"
+            className="w-full h-full object-cover"
+          />
+          <div className="absolute inset-0 bg-black/40" />
         </div>
+      )}
 
+      {!characterImage && (
+        <div className="fixed inset-0 z-0 bg-secondary" />
+      )}
+
+      {/* Content */}
+      <div className="relative z-10 max-w-lg mx-auto px-4 pt-12">
         {/* Timer Circle */}
-        <div className="relative flex items-center justify-center mb-12">
+        <div className="relative flex items-center justify-center mb-12 mt-20">
           <div className="relative w-80 h-80">
             {/* Background Circle */}
             <svg className="absolute inset-0 w-full h-full -rotate-90">
@@ -120,49 +188,44 @@ const Home = () => {
                 cy="160"
                 r="140"
                 fill="none"
-                stroke="currentColor"
+                stroke="white"
                 strokeWidth="8"
-                className="text-muted/30"
+                opacity="0.3"
               />
-              <circle
-                cx="160"
-                cy="160"
-                r="140"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="8"
-                strokeDasharray={`${2 * Math.PI * 140}`}
-                strokeDashoffset={`${2 * Math.PI * 140 * (1 - progress / 100)}`}
-                strokeLinecap="round"
-                className={`transition-all duration-300 ${
-                  isWorkSession ? "text-accent" : "text-timer-break"
-                }`}
-              />
-            </svg>
-
-            {/* Character Image or Placeholder */}
-            <div className="absolute inset-4 rounded-full overflow-hidden bg-card flex items-center justify-center">
-              {characterImage ? (
-                <img
-                  src={characterImage}
-                  alt="Character"
-                  className="w-full h-full object-cover"
+              {currentTask?.timerType === "countdown" && (
+                <circle
+                  cx="160"
+                  cy="160"
+                  r="140"
+                  fill="none"
+                  stroke="white"
+                  strokeWidth="8"
+                  strokeDasharray={`${2 * Math.PI * 140}`}
+                  strokeDashoffset={`${2 * Math.PI * 140 * (1 - progress / 100)}`}
+                  strokeLinecap="round"
+                  className="transition-all duration-300"
                 />
-              ) : (
-                <div className="text-center p-8">
-                  <Upload className="w-12 h-12 mx-auto mb-2 text-muted-foreground" />
-                  <p className="text-sm text-muted-foreground">点击下方按钮</p>
-                  <p className="text-sm text-muted-foreground">上传角色图片</p>
-                </div>
               )}
-            </div>
+            </svg>
 
             {/* Timer Display */}
             <div className="absolute inset-0 flex items-center justify-center">
-              <div className="text-center bg-card/90 backdrop-blur-sm px-8 py-4 rounded-2xl">
-                <div className="text-5xl font-bold text-foreground">
-                  {formatTime(timeLeft)}
-                </div>
+              <div className="text-center">
+                {currentTask ? (
+                  <>
+                    <p className="text-white text-xl font-medium mb-2">
+                      {currentTask.title}
+                    </p>
+                    <div className="text-white text-5xl font-bold mb-2">
+                      {formatTime(timeLeft)}
+                    </div>
+                    {isRunning && (
+                      <p className="text-white text-sm">专注中</p>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-white text-lg">请从任务列表选择任务开始专注</p>
+                )}
               </div>
             </div>
           </div>
@@ -172,26 +235,28 @@ const Home = () => {
         <div className="flex justify-center gap-4 mb-6">
           <Button
             size="lg"
-            variant={isRunning ? "outline" : "default"}
+            variant="secondary"
             className="w-16 h-16 rounded-full"
             onClick={() => setIsRunning(!isRunning)}
+            disabled={!currentTask}
           >
-            {isRunning ? (
-              <Pause className="w-6 h-6" />
-            ) : (
-              <Play className="w-6 h-6" />
-            )}
+            <Pause className="w-6 h-6" />
           </Button>
           <Button
             size="lg"
-            variant="outline"
+            variant="secondary"
             className="w-16 h-16 rounded-full"
-            onClick={() => {
-              setIsRunning(false);
-              setTimeLeft(isWorkSession ? workTime : breakTime);
-            }}
           >
-            <RotateCcw className="w-6 h-6" />
+            <Music className="w-6 h-6" />
+          </Button>
+          <Button
+            size="lg"
+            variant="secondary"
+            className="w-16 h-16 rounded-full"
+            onClick={handleStop}
+            disabled={!currentTask}
+          >
+            <StopCircle className="w-6 h-6" />
           </Button>
         </div>
 
@@ -205,7 +270,7 @@ const Home = () => {
             className="hidden"
           />
           <Button
-            variant="outline"
+            variant="secondary"
             onClick={() => fileInputRef.current?.click()}
             className="gap-2"
           >

@@ -1,145 +1,235 @@
 import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import BottomNav from "@/components/BottomNav";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-} from "recharts";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
+
+interface TaskData {
+  taskName: string;
+  duration: number;
+  sessions: number;
+}
+
+interface DayData {
+  [taskId: string]: TaskData;
+}
+
+interface TimePoolData {
+  [date: string]: DayData;
+}
 
 const TimePool = () => {
-  const [selectedDate, setSelectedDate] = useState(new Date());
-  const [weekData, setWeekData] = useState<any[]>([]);
+  const [timePoolData, setTimePoolData] = useState<TimePoolData>({});
 
   useEffect(() => {
-    loadWeekData();
-  }, [selectedDate]);
+    const data = localStorage.getItem("taskTimePool");
+    if (data) setTimePoolData(JSON.parse(data));
+  }, []);
 
-  const loadWeekData = () => {
-    const timePool = JSON.parse(localStorage.getItem("timePool") || "{}");
-    const data = [];
+  const formatTime = (seconds: number) => {
+    const hours = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    if (hours > 0) return `${hours}小时${mins}分钟`;
+    return `${mins}分钟`;
+  };
+
+  // Calculate statistics
+  const calculateStats = () => {
+    const today = new Date().toISOString().split("T")[0];
+    const dates = Object.keys(timePoolData).sort();
     
-    for (let i = 6; i >= 0; i--) {
-      const date = new Date(selectedDate);
-      date.setDate(date.getDate() - i);
-      const dateStr = date.toISOString().split("T")[0];
-      const dayData = timePool[dateStr] || { work: 0, break: 0 };
-      
-      data.push({
-        date: `${date.getMonth() + 1}/${date.getDate()}`,
-        工作: Math.round(dayData.work / 60),
-        休息: Math.round(dayData.break / 60),
+    let totalDuration = 0;
+    let totalSessions = 0;
+    let todayDuration = 0;
+    let todaySessions = 0;
+
+    dates.forEach((date) => {
+      const dayTasks = timePoolData[date];
+      Object.values(dayTasks).forEach((task) => {
+        totalDuration += task.duration;
+        totalSessions += task.sessions;
+        
+        if (date === today) {
+          todayDuration += task.duration;
+          todaySessions += task.sessions;
+        }
       });
-    }
+    });
+
+    const daysWithData = dates.length;
+    const avgDuration = daysWithData > 0 ? totalDuration / daysWithData : 0;
+
+    return {
+      totalDuration,
+      totalSessions,
+      avgDuration,
+      todayDuration,
+      todaySessions,
+    };
+  };
+
+  const stats = calculateStats();
+
+  // Get today's task distribution
+  const getTodayData = () => {
+    const today = new Date().toISOString().split("T")[0];
+    const todayTasks = timePoolData[today] || {};
     
-    setWeekData(data);
+    return Object.values(todayTasks).map((task) => ({
+      name: task.taskName,
+      时长: Math.floor(task.duration / 60),
+    }));
   };
 
-  const changeWeek = (direction: number) => {
-    const newDate = new Date(selectedDate);
-    newDate.setDate(newDate.getDate() + direction * 7);
-    setSelectedDate(newDate);
+  // Get week's task distribution
+  const getWeekData = () => {
+    const today = new Date();
+    const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const taskTotals: { [taskName: string]: number } = {};
+
+    Object.entries(timePoolData).forEach(([date, dayTasks]) => {
+      const dateObj = new Date(date);
+      if (dateObj >= weekAgo && dateObj <= today) {
+        Object.values(dayTasks).forEach((task) => {
+          if (!taskTotals[task.taskName]) {
+            taskTotals[task.taskName] = 0;
+          }
+          taskTotals[task.taskName] += task.duration;
+        });
+      }
+    });
+
+    return Object.entries(taskTotals).map(([name, duration]) => ({
+      name,
+      时长: Math.floor(duration / 60),
+    }));
   };
 
-  const formatDate = (date: Date) => {
-    return `${date.getFullYear()}年${date.getMonth() + 1}月`;
-  };
+  // Get month's task distribution
+  const getMonthData = () => {
+    const today = new Date();
+    const monthAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const taskTotals: { [taskName: string]: number } = {};
 
-  const totalWork = weekData.reduce((sum, day) => sum + day.工作, 0);
-  const totalBreak = weekData.reduce((sum, day) => sum + day.休息, 0);
-  const totalMinutes = totalWork + totalBreak;
+    Object.entries(timePoolData).forEach(([date, dayTasks]) => {
+      const dateObj = new Date(date);
+      if (dateObj >= monthAgo && dateObj <= today) {
+        Object.values(dayTasks).forEach((task) => {
+          if (!taskTotals[task.taskName]) {
+            taskTotals[task.taskName] = 0;
+          }
+          taskTotals[task.taskName] += task.duration;
+        });
+      }
+    });
+
+    return Object.entries(taskTotals).map(([name, duration]) => ({
+      name,
+      时长: Math.floor(duration / 60),
+    }));
+  };
 
   return (
     <div className="min-h-screen bg-secondary pb-24">
       <div className="max-w-lg mx-auto px-4 pt-12">
         {/* Header */}
-        <div className="text-center mb-6">
-          <h1 className="text-2xl font-bold text-foreground">时间池</h1>
-          <p className="text-sm text-muted-foreground mt-1">查看你的时间使用情况</p>
-        </div>
+        <h1 className="text-2xl font-bold text-foreground mb-6">数据统计</h1>
 
-        {/* Date Navigation */}
-        <div className="flex items-center justify-between mb-6">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => changeWeek(-1)}
-          >
-            <ChevronLeft className="w-5 h-5" />
-          </Button>
-          <span className="text-lg font-medium">{formatDate(selectedDate)}</span>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => changeWeek(1)}
-          >
-            <ChevronRight className="w-5 h-5" />
-          </Button>
-        </div>
-
-        {/* Summary Cards */}
-        <div className="grid grid-cols-3 gap-3 mb-6">
-          <Card className="p-4 text-center">
-            <p className="text-sm text-muted-foreground mb-1">总时长</p>
-            <p className="text-2xl font-bold text-foreground">{totalMinutes}</p>
-            <p className="text-xs text-muted-foreground">分钟</p>
+        {/* Overall Stats */}
+        <div className="grid grid-cols-2 gap-4 mb-6">
+          <Card className="p-4">
+            <p className="text-sm text-muted-foreground mb-1">累计专注</p>
+            <p className="text-2xl font-bold text-foreground">{stats.totalSessions}</p>
+            <p className="text-xs text-muted-foreground mt-1">次</p>
           </Card>
-          <Card className="p-4 text-center">
-            <p className="text-sm text-muted-foreground mb-1">工作</p>
-            <p className="text-2xl font-bold text-accent">{totalWork}</p>
-            <p className="text-xs text-muted-foreground">分钟</p>
+          <Card className="p-4">
+            <p className="text-sm text-muted-foreground mb-1">累计时长</p>
+            <p className="text-2xl font-bold text-foreground">
+              {Math.floor(stats.totalDuration / 3600)}
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">小时</p>
           </Card>
-          <Card className="p-4 text-center">
-            <p className="text-sm text-muted-foreground mb-1">休息</p>
-            <p className="text-2xl font-bold text-timer-break">{totalBreak}</p>
-            <p className="text-xs text-muted-foreground">分钟</p>
+          <Card className="p-4">
+            <p className="text-sm text-muted-foreground mb-1">日均时长</p>
+            <p className="text-2xl font-bold text-foreground">
+              {Math.floor(stats.avgDuration / 60)}
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">分钟</p>
+          </Card>
+          <Card className="p-4">
+            <p className="text-sm text-muted-foreground mb-1">今日专注</p>
+            <p className="text-2xl font-bold text-foreground">{stats.todaySessions}</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              {formatTime(stats.todayDuration)}
+            </p>
           </Card>
         </div>
 
-        {/* Chart */}
-        <Card className="p-4 mb-6">
-          <h2 className="text-lg font-semibold mb-4">本周统计</h2>
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={weekData}>
-              <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
-              <XAxis dataKey="date" />
-              <YAxis />
-              <Tooltip />
-              <Legend />
-              <Bar dataKey="工作" fill="hsl(var(--accent))" radius={[8, 8, 0, 0]} />
-              <Bar dataKey="休息" fill="hsl(var(--timer-break))" radius={[8, 8, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </Card>
+        {/* Task Distribution Charts */}
+        <Tabs defaultValue="today" className="w-full">
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="today">今日</TabsTrigger>
+            <TabsTrigger value="week">本周</TabsTrigger>
+            <TabsTrigger value="month">本月</TabsTrigger>
+          </TabsList>
 
-        {/* Daily Details */}
-        <Card className="p-4">
-          <h2 className="text-lg font-semibold mb-4">每日详情</h2>
-          <div className="space-y-3">
-            {weekData.map((day, index) => (
-              <div key={index} className="flex items-center justify-between py-2 border-b border-border last:border-0">
-                <span className="text-sm text-muted-foreground">{day.date}</span>
-                <div className="flex gap-4">
-                  <span className="text-sm">
-                    <span className="text-accent font-medium">{day.工作}</span>
-                    <span className="text-muted-foreground ml-1">分钟</span>
-                  </span>
-                  <span className="text-sm">
-                    <span className="text-timer-break font-medium">{day.休息}</span>
-                    <span className="text-muted-foreground ml-1">分钟</span>
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </Card>
+          <TabsContent value="today" className="mt-4">
+            <Card className="p-4">
+              <h3 className="text-lg font-semibold mb-4">今日任务时长分布</h3>
+              {getTodayData().length > 0 ? (
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={getTodayData()}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="name" />
+                    <YAxis />
+                    <Tooltip />
+                    <Bar dataKey="时长" fill="hsl(var(--accent))" />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <p className="text-center text-muted-foreground py-8">今日暂无数据</p>
+              )}
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="week" className="mt-4">
+            <Card className="p-4">
+              <h3 className="text-lg font-semibold mb-4">本周任务时长分布</h3>
+              {getWeekData().length > 0 ? (
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={getWeekData()}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="name" />
+                    <YAxis />
+                    <Tooltip />
+                    <Bar dataKey="时长" fill="hsl(var(--accent))" />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <p className="text-center text-muted-foreground py-8">本周暂无数据</p>
+              )}
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="month" className="mt-4">
+            <Card className="p-4">
+              <h3 className="text-lg font-semibold mb-4">本月任务时长分布</h3>
+              {getMonthData().length > 0 ? (
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={getMonthData()}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="name" />
+                    <YAxis />
+                    <Tooltip />
+                    <Bar dataKey="时长" fill="hsl(var(--accent))" />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <p className="text-center text-muted-foreground py-8">本月暂无数据</p>
+              )}
+            </Card>
+          </TabsContent>
+        </Tabs>
       </div>
 
       <BottomNav />

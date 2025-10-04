@@ -3,9 +3,10 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, Play } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import BottomNav from "@/components/BottomNav";
+import { useNavigate } from "react-router-dom";
 import {
   Dialog,
   DialogContent,
@@ -27,6 +28,7 @@ interface Todo {
   completed: boolean;
   priority: "high" | "medium" | "low";
   dueDate?: string;
+  timerType: "countdown" | "countup";
 }
 
 const TodoList = () => {
@@ -34,8 +36,10 @@ const TodoList = () => {
   const [newTitle, setNewTitle] = useState("");
   const [newPriority, setNewPriority] = useState<"high" | "medium" | "low">("medium");
   const [newDueDate, setNewDueDate] = useState("");
+  const [newTimerType, setNewTimerType] = useState<"countdown" | "countup">("countdown");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   useEffect(() => {
     const saved = localStorage.getItem("todos");
@@ -61,12 +65,14 @@ const TodoList = () => {
       completed: false,
       priority: newPriority,
       dueDate: newDueDate || undefined,
+      timerType: newTimerType,
     };
 
     setTodos([todo, ...todos]);
     setNewTitle("");
     setNewPriority("medium");
     setNewDueDate("");
+    setNewTimerType("countdown");
     setIsDialogOpen(false);
     
     toast({
@@ -116,6 +122,10 @@ const TodoList = () => {
     }
   };
 
+  const startFocus = (todo: Todo) => {
+    navigate("/", { state: { task: todo } });
+  };
+
   const activeTodos = todos.filter((t) => !t.completed);
   const completedTodos = todos.filter((t) => t.completed);
 
@@ -157,6 +167,15 @@ const TodoList = () => {
                     <SelectItem value="low">低优先级</SelectItem>
                   </SelectContent>
                 </Select>
+                <Select value={newTimerType} onValueChange={(value: any) => setNewTimerType(value)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="选择计时类型" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="countdown">倒计时</SelectItem>
+                    <SelectItem value="countup">正计时</SelectItem>
+                  </SelectContent>
+                </Select>
                 <Input
                   type="date"
                   value={newDueDate}
@@ -191,6 +210,9 @@ const TodoList = () => {
                         <span className={`text-xs font-medium ${getPriorityColor(todo.priority)}`}>
                           {getPriorityText(todo.priority)}优先级
                         </span>
+                        <span className="text-xs text-muted-foreground">
+                          {todo.timerType === "countdown" ? "倒计时" : "正计时"}
+                        </span>
                         {todo.dueDate && (
                           <span className="text-xs text-muted-foreground">
                             {new Date(todo.dueDate).toLocaleDateString("zh-CN")}
@@ -199,9 +221,18 @@ const TodoList = () => {
                       </div>
                     </div>
                     <Button
+                      variant="default"
+                      size="icon"
+                      onClick={() => startFocus(todo)}
+                      className="shrink-0"
+                    >
+                      <Play className="w-4 h-4" />
+                    </Button>
+                    <Button
                       variant="ghost"
                       size="icon"
                       onClick={() => deleteTodo(todo.id)}
+                      className="shrink-0"
                     >
                       <Trash2 className="w-4 h-4 text-muted-foreground" />
                     </Button>
